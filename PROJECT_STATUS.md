@@ -1,5 +1,5 @@
 # Project status
-**Latest stable phase:** phase-2-news-ai (branch `ccr-01f79ea2-5hbe2r`; commit hash in git log)
+**Latest stable phase:** phase-3-watchlist (branch `ccr-01f79ea2-5hbe2r`; commit hash in git log)
 
 ## Done
 - Phase 0: skeleton, config, GitHub Actions (run on 180aad5: **success**), PowerShell scripts.
@@ -13,8 +13,11 @@
   quota/key/model/malformed fallbacks; combined score = 0.7*quant + 0.3*news only when both exist.
   Also fixed UI bug: analysis disappeared on any later click (ticker now kept in session state).
 
+- Phase 3: SQLite (`data/stock_research.db`, git-ignored) watchlist, daily research snapshots, history expander,
+  Watchlist view with multi-stock comparison table + rebased price chart; corrupted DB is moved aside and recreated.
+
 ## Tests actually run (Linux sandbox, Python 3.13)
-- `pytest -q`: 56 passed (unit, mocked integration, Streamlit AppTest). Headless Streamlit start: health `ok`, root HTTP 200.
+- `pytest -q`: 60 passed (unit, mocked integration, Streamlit AppTest). Headless Streamlit start: health `ok`, root HTTP 200.
 - GitHub Actions for Phase 1: see Actions tab (not yet checked when this file was written).
 
 ## Known limitations
@@ -29,4 +32,4 @@
 - Windows verification of `setup.ps1`, `run.ps1`, app with live data (try AAPL, TCS.NS, RELIANCE.BO).
 
 ## Next task
-Phase 3: SQLite watchlist, research history, compare view (`src/storage.py`).
+Phase 4: curated US+India screener (`src/screener.py`, `data/universe` as a Python list), quant-first, bounded news.

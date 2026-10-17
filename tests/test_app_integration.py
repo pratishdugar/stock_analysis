@@ -72,3 +72,13 @@ def test_news_failure_keeps_combined_unavailable(monkeypatch):
     next(b for b in at.button if b.label == "Run news analysis").click().run(timeout=30)
     assert not at.exception and at.error
     assert next(m for m in at.metric if m.label.startswith("Combined")).value == "Unavailable"
+
+
+def test_snapshot_saved_and_watchlist_page(monkeypatch):
+    from src import storage
+    at = run(monkeypatch, md.DataResult(data=fake_hist()), md.DataResult(error="x"))
+    assert storage.research_history("AAPL")[0]["label"].startswith("Incomplete")
+    next(b for b in at.button if b.label == "Add to watchlist").click().run(timeout=30)
+    assert storage.list_watchlist() == ["AAPL"]
+    at.sidebar.radio[0].set_value("Watchlist").run(timeout=30)
+    assert not at.exception and at.dataframe

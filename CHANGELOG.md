@@ -7,3 +7,6 @@
 
 ## Phase 2 - news + Gemini
 - RSS news, Gemini structured analysis, cache, fallbacks, combined score; 56 tests.
+
+## Phase 3 - watchlist
+- SQLite watchlist/history, compare view; 60 tests.

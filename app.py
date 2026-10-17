@@ -5,7 +5,7 @@ import streamlit as st
 from plotly.subplots import make_subplots
 
 import config
-from src import fundamentals, gemini_analysis, market_data as md, news as news_mod, scoring, technicals as ta
+from src import fundamentals, gemini_analysis, market_data as md, news as news_mod, report, scoring, storage, technicals as ta
 
 st.set_page_config(page_title="Stock Research", page_icon="📈", layout="wide")
 st.title("📈 Stock Research")
@@ -29,7 +29,52 @@ def fmt_pct(v):
     return "n/a" if v is None else f"{v:.1%}"
 
 
+def safe_storage(fn, *a, default=None, **k):
+    try:
+        return fn(*a, **k)
+    except Exception as exc:  # storage must never crash the app
+        st.sidebar.warning(f"Local storage problem ({type(exc).__name__}); feature skipped.")
+        return default
+
+
+def watchlist_page():
+    st.subheader("Watchlist & comparison")
+    wl = safe_storage(storage.list_watchlist, default=[])
+    if not wl:
+        st.info("Your watchlist is empty. Analyse a stock and click **Add to watchlist**.")
+        return
+    picked = st.multiselect("Compare / manage", wl, default=wl[:4], max_selections=6)
+    if st.button("Remove selected from watchlist") and picked:
+        for p in picked:
+            safe_storage(storage.remove_watchlist, p)
+        st.rerun()
+    rows, fig = [], go.Figure()
+    for sym in picked:
+        h, herr = load_history(sym)
+        if herr:
+            rows.append({"Symbol": sym, "Label": f"Data error: {herr}"})
+            continue
+        i, ierr = load_info(sym)
+        b, _ = load_history(md.benchmark_for(sym)[0])
+        sm = report.build_summary(sym, h, md.DataResult(data=i, error=ierr) if not ierr else md.DataResult(error=ierr),
+                                  b["Close"] if b is not None else None)
+        rows.append({"Symbol": sym, "Market": sm["market"], "Currency": sm["currency"] or "?",
+                     "Quant score": "Incomplete" if sm["quant_score"] is None else sm["quant_score"],
+                     "Coverage": f"{sm['coverage']:.0%}", "1y return": fmt_pct(sm["ret_1y"]),
+                     "Max drawdown (3y)": fmt_pct(sm["max_drawdown"]), "Label (quant only)": sm["label"]})
+        c = h["Close"].tail(504)
+        fig.add_trace(go.Scatter(x=c.index, y=c / c.iloc[0] * 100, name=sym))
+    if rows:
+        st.dataframe(pd.DataFrame(rows), hide_index=True)
+        st.caption("Scores are comparable only as rough screens: generic thresholds, prices in different "
+                   "currencies are shown rebased to 100 (no FX conversion needed for the chart).")
+    if fig.data:
+        fig.update_layout(height=400, yaxis_title="Rebased price (start = 100, ~2y)")
+        st.plotly_chart(fig, width="stretch")
+
+
 with st.sidebar:
+    view = st.radio("View", ["Analyse", "Watchlist"], horizontal=True)
     raw = st.text_input("Ticker", value="AAPL", help="US: AAPL | NSE: RELIANCE.NS | BSE: RELIANCE.BO")
     go_btn = st.button("Analyse", type="primary")
     st.markdown("**Examples:** `AAPL`, `MSFT`, `TCS.NS`, `RELIANCE.BO`")
@@ -37,6 +82,10 @@ with st.sidebar:
         st.success("Gemini configured.")
     else:
         st.warning("Gemini not configured - app works without it; combined score is unavailable.")
+
+if view == "Watchlist":
+    watchlist_page()
+    st.stop()
 
 if go_btn:
     st.session_state["active_ticker"] = raw
@@ -88,6 +137,17 @@ st.caption("Thresholds: >=75 Buy Candidate, 55-74 Hold/Watchlist, <55 Avoid/Sell
            "A low score on a stock you own means *review*, not an automatic sell.")
 for r in result["risks"]:
     st.warning(r)
+
+safe_storage(storage.save_research, symbol, result["quant_score"], result["coverage"], result["label"],
+             news_score, combined, metrics.get("currency"), {"risks": result["risks"]})
+if st.button("Add to watchlist"):
+    safe_storage(storage.add_watchlist, symbol)
+    st.success(f"{symbol} added to watchlist.")
+past = safe_storage(storage.research_history, symbol, 10, default=[])
+if len(past) > 1:
+    with st.expander("Previous research snapshots (local)"):
+        st.dataframe(pd.DataFrame(past)[["day", "quant_score", "news_score", "combined_score", "label"]],
+                     hide_index=True)
 
 tab1, tab2, tab3, tab4 = st.tabs(["Price & indicators", "Score breakdown", "Fundamentals", "News (Gemini)"])
 
