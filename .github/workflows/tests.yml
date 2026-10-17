@@ -1,0 +1,27 @@
+name: tests
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Syntax / import check
+        run: |
+          python -m compileall -q app.py config.py src
+          python -c "import streamlit, pandas, numpy, plotly, yfinance, feedparser, google.genai, dotenv"
+      - name: Unit and integration tests (no secrets, no live APIs)
+        run: pytest -q
+      - name: Streamlit startup smoke test
+        run: |
+          streamlit run app.py --server.headless true --server.port 8599 > streamlit.log 2>&1 &
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:8599/_stcore/health && exit 0
+            sleep 1
+          done
+          cat streamlit.log; exit 1
