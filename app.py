@@ -118,7 +118,7 @@ def screener_page():
 
 
 with st.sidebar:
-    view = st.radio("View", ["Analyse", "Watchlist", "Screener"], horizontal=True)
+    view = st.radio("View", ["Analyse", "Watchlist", "Screener", "Portfolio"])
     raw = st.text_input("Ticker", value="AAPL", help="US: AAPL | NSE: RELIANCE.NS | BSE: RELIANCE.BO")
     go_btn = st.button("Analyse", type="primary")
     st.markdown("**Examples:** `AAPL`, `MSFT`, `TCS.NS`, `RELIANCE.BO`")
@@ -132,6 +132,10 @@ if view == "Watchlist":
     st.stop()
 if view == "Screener":
     screener_page()
+    st.stop()
+if view == "Portfolio":
+    import ui_portfolio
+    ui_portfolio.portfolio_page(load_history, summarize_symbol)
     st.stop()
 
 if go_btn:

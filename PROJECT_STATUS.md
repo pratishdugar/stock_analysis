@@ -1,5 +1,5 @@
 # Project status
-**Latest stable phase:** phase-4-screener (branch `ccr-01f79ea2-5hbe2r`; commit hash in git log)
+**Latest stable phase:** phase-5-portfolio (branch `ccr-01f79ea2-5hbe2r`; commit hash in git log)
 
 ## Done
 - Phase 0: skeleton, config, GitHub Actions (run on 180aad5: **success**), PowerShell scripts.
@@ -19,8 +19,15 @@
 - Phase 4: curated 30-stock universe (`src/universe.py`), quant-first screener with filters (score, coverage, risk
   flags, drawdown), cached data, Gemini news only on demand for top 3 (hard cap).
 
+- Phase 5 (portfolio, one commit): Portfolio view with tabs - Overview & decisions, Stocks (lots, CSV import, P&L, XIRR),
+  Mutual funds & SIPs (mfapi.in / Yahoo NAV, lump sums, SIPs with NAV-derived units, fund score + recommendation),
+  Gold/FD/PPF/private/real estate/cash (manual values, FD accrual), Settings (horizon, thresholds, max position %,
+  target allocation, USD/INR; defaults in `config.PORTFOLIO_DEFAULTS`), Backup (JSON export/restore).
+  Rule-based Buy more / Hold / Trim / Review per stock, Continue / Hold / Review per fund, allocation drift.
+  Data is local (`data/`, git-ignored). Totals only combine INR/USD with a known rate; otherwise excluded with a warning.
+
 ## Tests actually run (Linux sandbox, Python 3.13)
-- `pytest -q`: 65 passed (unit, mocked integration, Streamlit AppTest). Headless Streamlit start: health `ok`, root HTTP 200.
+- `pytest -q`: 104 passed (unit, mocked integration, Streamlit AppTest). Headless Streamlit start: health `ok`, root HTTP 200.
 - GitHub Actions for Phase 1: see Actions tab (not yet checked when this file was written).
 
 ## Known limitations
@@ -30,6 +37,10 @@
 - Currency: figures shown in the source's reported currency; no conversion.
 - Gemini never called for real (no key, mocks only); RSS never fetched live. Gemini model ID not verified from official docs; user must set `GEMINI_MODEL`.
 - No browser/UI automation performed.
+
+- mfapi.in endpoints/response format and the Yahoo `INR=X` symbol are from memory and never exercised live.
+- Portfolio recommendations ignore tax, exit loads, dividends; fund analysis has no category-peer ranking.
+- Only INR and USD supported.
 
 ## Pending (needs user)
 - Windows verification of `setup.ps1`, `run.ps1`, app with live data (try AAPL, TCS.NS, RELIANCE.BO).

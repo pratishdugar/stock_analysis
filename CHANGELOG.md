@@ -13,3 +13,6 @@
 
 ## Phase 4 - screener
 - Curated universe + quant screener, capped news step; 65 tests.
+
+## Phase 5 - portfolio
+- Stocks, mutual funds + SIPs, gold/FD/private assets, settings, allocation, backup; 104 tests.

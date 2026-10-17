@@ -9,4 +9,6 @@ def build_summary(symbol: str, hist, info_result, bench_close=None) -> dict:
     return {"symbol": symbol, "name": metrics.get("name"), "currency": metrics.get("currency"),
             "market": md.market_of(symbol), "quant_score": result["quant_score"], "coverage": result["coverage"],
             "label": result["label"], "risks": result["risks"], "ret_1y": ta.period_return(close, 252),
-            "max_drawdown": ta.max_drawdown(close.tail(756)), "result": result, "metrics": metrics}
+            "max_drawdown": ta.max_drawdown(close.tail(756)), "result": result, "metrics": metrics,
+            "last_price": float(close.iloc[-1]), "last_date": close.index[-1].date(),
+            "close": close, "bench": bench_close}

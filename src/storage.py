@@ -15,6 +15,18 @@ CREATE TABLE IF NOT EXISTS research (
   symbol TEXT NOT NULL, day TEXT NOT NULL, quant_score REAL, coverage REAL, label TEXT,
   news_score REAL, combined_score REAL, currency TEXT, details TEXT,
   PRIMARY KEY (symbol, day));
+CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
+CREATE TABLE IF NOT EXISTS stock_lots (id INTEGER PRIMARY KEY AUTOINCREMENT, symbol TEXT NOT NULL, qty REAL NOT NULL,
+  price REAL NOT NULL, buy_date TEXT NOT NULL, currency TEXT, notes TEXT);
+CREATE TABLE IF NOT EXISTS funds (id INTEGER PRIMARY KEY AUTOINCREMENT, code TEXT NOT NULL, source TEXT NOT NULL,
+  name TEXT, category TEXT, benchmark TEXT, expense_ratio REAL, currency TEXT);
+CREATE TABLE IF NOT EXISTS fund_lots (id INTEGER PRIMARY KEY AUTOINCREMENT, fund_id INTEGER NOT NULL,
+  units REAL NOT NULL, nav REAL NOT NULL, buy_date TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS sips (id INTEGER PRIMARY KEY AUTOINCREMENT, fund_id INTEGER NOT NULL, amount REAL NOT NULL,
+  day INTEGER NOT NULL, start_date TEXT NOT NULL, end_date TEXT);
+CREATE TABLE IF NOT EXISTS assets (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, name TEXT NOT NULL,
+  currency TEXT, invested REAL, current_value REAL, start_date TEXT, rate_pct REAL, maturity_date TEXT,
+  quantity REAL, updated TEXT, notes TEXT);
 """
 
 
@@ -67,3 +79,36 @@ def research_history(symbol, limit=30, path=None) -> list[dict]:
         rows = con.execute("SELECT * FROM research WHERE symbol = ? ORDER BY day DESC LIMIT ?",
                            (symbol, limit)).fetchall()
     return [dict(r) for r in rows]
+
+
+# --- generic CRUD for portfolio tables (table/column names are whitelisted) ---
+TABLES = {
+    "stock_lots": ["symbol", "qty", "price", "buy_date", "currency", "notes"],
+    "funds": ["code", "source", "name", "category", "benchmark", "expense_ratio", "currency"],
+    "fund_lots": ["fund_id", "units", "nav", "buy_date"],
+    "sips": ["fund_id", "amount", "day", "start_date", "end_date"],
+    "assets": ["kind", "name", "currency", "invested", "current_value", "start_date", "rate_pct",
+               "maturity_date", "quantity", "updated", "notes"],
+}
+
+
+def add_row(table, values: dict, path=None) -> int:
+    cols = [c for c in TABLES[table] if c in values]
+    with _connect(path) as con:
+        cur = con.execute(f"INSERT INTO {table} ({','.join(cols)}) VALUES ({','.join('?' * len(cols))})",
+                          [values[c] for c in cols])
+        return cur.lastrowid
+
+
+def list_rows(table, path=None) -> list[dict]:
+    with _connect(path) as con:
+        con.row_factory = sqlite3.Row
+        return [dict(r) for r in con.execute(f"SELECT * FROM {table} ORDER BY id")]
+
+
+def delete_row(table, row_id, path=None) -> None:
+    with _connect(path) as con:
+        con.execute(f"DELETE FROM {table} WHERE id = ?", (row_id,))
+        if table == "funds":  # keep children consistent
+            con.execute("DELETE FROM fund_lots WHERE fund_id = ?", (row_id,))
+            con.execute("DELETE FROM sips WHERE fund_id = ?", (row_id,))
