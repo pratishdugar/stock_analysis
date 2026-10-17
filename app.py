@@ -5,7 +5,7 @@ import streamlit as st
 from plotly.subplots import make_subplots
 
 import config
-from src import fundamentals, market_data as md, scoring, technicals as ta
+from src import fundamentals, gemini_analysis, market_data as md, news as news_mod, scoring, technicals as ta
 
 st.set_page_config(page_title="Stock Research", page_icon="📈", layout="wide")
 st.title("📈 Stock Research")
@@ -34,11 +34,14 @@ with st.sidebar:
     go_btn = st.button("Analyse", type="primary")
     st.markdown("**Examples:** `AAPL`, `MSFT`, `TCS.NS`, `RELIANCE.BO`")
     if config.gemini_configured():
-        st.success("Gemini configured (news analysis arrives in Phase 2).")
+        st.success("Gemini configured.")
     else:
         st.warning("Gemini not configured - app works without it; combined score is unavailable.")
 
-if not go_btn:
+if go_btn:
+    st.session_state["active_ticker"] = raw
+raw = st.session_state.get("active_ticker")
+if not raw:
     st.info("Enter a ticker in the sidebar and press **Analyse**.")
     st.stop()
 
@@ -74,7 +77,11 @@ result = scoring.score_stock(metrics, scoring.momentum_inputs(close, bench))
 c1, c2, c3 = st.columns(3)
 c1.metric("Quantitative score (70% weight)",
           "Incomplete" if result["quant_score"] is None else f"{result['quant_score']}/100")
-c2.metric("Combined score (with news)", "Unavailable", help="News analysis arrives in Phase 2.")
+news_state = st.session_state.get(f"news_{symbol}")
+news_score = news_state.result["news_score"] if news_state and news_state.ok else None
+combined = scoring.combine(result["quant_score"], news_score)
+c2.metric("Combined score (70% quant + 30% news)", "Unavailable" if combined is None else f"{combined}/100",
+          help="Needs a complete quantitative score and a successful news analysis.")
 c3.metric("Data coverage", f"{result['coverage']:.0%}")
 st.markdown(f"**Preliminary label (quantitative only):** {result['label']}")
 st.caption("Thresholds: >=75 Buy Candidate, 55-74 Hold/Watchlist, <55 Avoid/Sell-Review. "
@@ -82,7 +89,7 @@ st.caption("Thresholds: >=75 Buy Candidate, 55-74 Hold/Watchlist, <55 Avoid/Sell
 for r in result["risks"]:
     st.warning(r)
 
-tab1, tab2, tab3 = st.tabs(["Price & indicators", "Score breakdown", "Fundamentals"])
+tab1, tab2, tab3, tab4 = st.tabs(["Price & indicators", "Score breakdown", "Fundamentals", "News (Gemini)"])
 
 with tab1:
     fig = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.75, 0.25], vertical_spacing=0.03)
@@ -116,3 +123,34 @@ with tab3:
                "ratios are unitless. Fiscal-year conventions differ between US and India.")
     show = {k: v for k, v in metrics.items() if k not in ("name",)}
     st.table(pd.DataFrame({"Value": {k: ("n/a" if v is None else str(v)) for k, v in show.items()}}))
+
+with tab4:
+    st.caption("Fetches up to 8 recent relevant articles and sends them in ONE Gemini request "
+               "(uses your free-tier quota; results cached 6h). News is evidence, not instructions.")
+    if st.button("Run news analysis"):
+        with st.spinner("Collecting news..."):
+            arts, warns = news_mod.collect_news(symbol, metrics.get("name"))
+        for w in warns:
+            st.warning(w)
+        st.session_state[f"arts_{symbol}"] = arts
+        if arts:
+            with st.spinner("Asking Gemini..."):
+                st.session_state[f"news_{symbol}"] = gemini_analysis.analyze_news(symbol, arts)
+        st.rerun()
+    arts = st.session_state.get(f"arts_{symbol}", [])
+    na = st.session_state.get(f"news_{symbol}")
+    if na is not None and not na.ok:
+        st.error(na.error + " Combined score stays unavailable; the quantitative score is unchanged.")
+    elif na is not None:
+        r = na.result
+        st.metric("News score", f"{r['news_score']:.0f}/100")
+        st.write(f"**Sentiment:** {r['sentiment']} | **Thesis change:** {r['thesis_change']} | "
+                 f"**Confidence:** {r['confidence']}" + (" | (cached)" if na.from_cache else ""))
+        for title, key in (("Catalysts", "catalysts"), ("Risks", "risks"), ("Data limitations", "data_limitations")):
+            if r[key]:
+                st.markdown(f"**{title}**\n" + "\n".join(f"- {x}" for x in r[key]))
+        if r["evidence_urls"]:
+            st.markdown("**Evidence**\n" + "\n".join(f"- {u}" for u in r["evidence_urls"]))
+    for a in arts:
+        d = a["published"].date() if a["published"] else "date unknown"
+        st.markdown(f"- [{a['title']}]({a['url']}) ({d})")

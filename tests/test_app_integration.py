@@ -22,7 +22,7 @@ def run(monkeypatch, hist, info):
     monkeypatch.setattr(md, "fetch_history", lambda s, *a, **k: hist)
     monkeypatch.setattr(md, "fetch_info", lambda s, *a, **k: info)
     at = AppTest.from_file(APP).run(timeout=30)
-    at.button[0].click().run(timeout=30)
+    next(b for b in at.button if b.label == "Analyse").click().run(timeout=30)
     return at
 
 
@@ -44,3 +44,31 @@ def test_missing_fundamentals_degrades_gracefully(monkeypatch):
 def test_history_failure_shows_error(monkeypatch):
     at = run(monkeypatch, md.DataResult(error="No price data found for 'AAPL'."), md.DataResult(error="x"))
     assert not at.exception and at.error
+
+
+def test_news_flow_combined_score(monkeypatch):
+    from src import gemini_analysis as ga, news as nw
+    arts = [{"title": "t", "url": "http://u", "summary": "", "source": "", "published": None}]
+    monkeypatch.setattr(nw, "collect_news", lambda *a, **k: (arts, []))
+    good = {"news_score": 60.0, "sentiment": "neutral", "thesis_change": "unchanged", "confidence": "low",
+            "catalysts": [], "risks": [], "evidence_urls": [], "data_limitations": []}
+    monkeypatch.setattr(ga, "analyze_news", lambda *a, **k: ga.NewsAnalysis(result=good))
+    info = md.DataResult(data={"returnOnEquity": 0.2, "profitMargins": 0.2, "operatingMargins": 0.25,
+                               "revenueGrowth": 0.1, "earningsGrowth": 0.1, "trailingPE": 20, "forwardPE": 18,
+                               "debtToEquity": 80, "currentRatio": 1.5, "freeCashflow": 1e9})
+    at = run(monkeypatch, md.DataResult(data=fake_hist()), info)
+    next(b for b in at.button if b.label == "Run news analysis").click().run(timeout=30)
+    assert not at.exception
+    comb = next(m for m in at.metric if m.label.startswith("Combined"))
+    assert comb.value != "Unavailable"
+
+
+def test_news_failure_keeps_combined_unavailable(monkeypatch):
+    from src import gemini_analysis as ga, news as nw
+    arts = [{"title": "t", "url": "http://u", "summary": "", "source": "", "published": None}]
+    monkeypatch.setattr(nw, "collect_news", lambda *a, **k: (arts, []))
+    monkeypatch.setattr(ga, "analyze_news", lambda *a, **k: ga.NewsAnalysis(error="Gemini free-tier quota exhausted"))
+    at = run(monkeypatch, md.DataResult(data=fake_hist()), md.DataResult(error="x"))
+    next(b for b in at.button if b.label == "Run news analysis").click().run(timeout=30)
+    assert not at.exception and at.error
+    assert next(m for m in at.metric if m.label.startswith("Combined")).value == "Unavailable"

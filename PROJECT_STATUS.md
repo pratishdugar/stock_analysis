@@ -1,5 +1,5 @@
 # Project status
-**Latest stable phase:** phase-1-quantitative (branch `ccr-01f79ea2-5hbe2r`; commit hash in git log)
+**Latest stable phase:** phase-2-news-ai (branch `ccr-01f79ea2-5hbe2r`; commit hash in git log)
 
 ## Done
 - Phase 0: skeleton, config, GitHub Actions (run on 180aad5: **success**), PowerShell scripts.
@@ -8,8 +8,13 @@
   (Quality 20, Growth 15, Valuation 15, Health 10, Momentum 10; normalized over available data),
   risk flags blocking Buy, incomplete-data handling. Combined score shown as **Unavailable** until Phase 2.
 
+- Phase 2: RSS news (Google News + Yahoo for US), dedupe, relevance filter, max 8 articles; single bounded Gemini
+  request (google-genai, model from `GEMINI_MODEL`), strict JSON validation (hallucinated URLs dropped), 6h in-memory cache,
+  quota/key/model/malformed fallbacks; combined score = 0.7*quant + 0.3*news only when both exist.
+  Also fixed UI bug: analysis disappeared on any later click (ticker now kept in session state).
+
 ## Tests actually run (Linux sandbox, Python 3.13)
-- `pytest -q`: 35 passed (unit, mocked integration, Streamlit AppTest). Headless Streamlit start: health `ok`, root HTTP 200.
+- `pytest -q`: 56 passed (unit, mocked integration, Streamlit AppTest). Headless Streamlit start: health `ok`, root HTTP 200.
 - GitHub Actions for Phase 1: see Actions tab (not yet checked when this file was written).
 
 ## Known limitations
@@ -17,11 +22,11 @@
   (`info` keys, `debtToEquity` in percent) are from memory and need checking on a real machine.
 - Score thresholds are generic (no sector/country calibration; financials skip leverage checks).
 - Currency: figures shown in the source's reported currency; no conversion.
-- Gemini model ID not verified from official docs; user must set `GEMINI_MODEL`.
+- Gemini never called for real (no key, mocks only); RSS never fetched live. Gemini model ID not verified from official docs; user must set `GEMINI_MODEL`.
 - No browser/UI automation performed.
 
 ## Pending (needs user)
 - Windows verification of `setup.ps1`, `run.ps1`, app with live data (try AAPL, TCS.NS, RELIANCE.BO).
 
 ## Next task
-Phase 2: `src/news.py` (RSS, dedupe, relevance), `src/gemini_analysis.py` (single bounded call, JSON validation, cache, fallback), mocked tests.
+Phase 3: SQLite watchlist, research history, compare view (`src/storage.py`).
