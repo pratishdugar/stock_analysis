@@ -6,8 +6,7 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-import config
-from src import market_data as md, mutual_funds as mf, portfolio as pf, settings as settings_mod, storage
+from src import backup, market_data as md, mutual_funds as mf, portfolio as pf, settings as settings_mod, storage
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -105,6 +104,8 @@ def _overview_tab(cfg, load_history, summarize_symbol):
     c3.metric("Unrealised P&L", _money(val_known - inv), _pct(val_known / inv - 1) if inv else None)
     c4.metric("Active SIPs / month", _money(r["sip_monthly"]))
 
+    _holdings_tables(r)
+
     st.markdown("#### Allocation vs target")
     alloc = pd.DataFrame(r["allocation"])
     if r["total"]:
@@ -132,6 +133,41 @@ def _overview_tab(cfg, load_history, summarize_symbol):
     st.dataframe(pd.DataFrame(rows), hide_index=True)
     st.caption("A low score means *review*, never an automatic sell. Your purchase price is deliberately ignored in "
                "recommendations (sunk cost). Unofficial data; dividends, tax and exit loads are not modelled.")
+
+
+def _num(v, nd=2):
+    return None if v is None else round(v, nd)
+
+
+def _holdings_tables(r):
+    """Per-holding value, P&L and XIRR in each holding's own currency."""
+    if r["stocks"]:
+        st.markdown("#### Stocks")
+        st.dataframe(pd.DataFrame([{
+            "Symbol": s["symbol"], "Currency": s["currency"], "Qty": s["qty"], "Avg cost": _num(s["avg_cost"]),
+            "Price": _num(s["price"]), "Invested": _num(s["invested"], 0), "Value": _num(s["value"], 0),
+            "P&L": _num(s["pnl"], 0), "P&L %": _pct(s["pnl_pct"]), "XIRR": _pct(s["xirr"]),
+            "Weight %": _num(s["weight_pct"], 1)} for s in r["stocks"]]), hide_index=True)
+    if r["funds"]:
+        st.markdown("#### Mutual funds")
+        st.dataframe(pd.DataFrame([{
+            "Fund": f["name"], "Category": f["category"], "Currency": f["currency"], "Units": _num(f["units"], 3),
+            "Invested": _num(f["invested"], 0), "Value": _num(f["value"], 0), "P&L": _num(f["pnl"], 0),
+            "P&L %": _pct(f["pnl_pct"]), "XIRR": _pct(f["xirr"]), "Score": f["analysis"]["score"],
+            "CAGR (window)": _pct(f["analysis"]["cagr"]), "Benchmark CAGR": _pct(f["analysis"]["bench_cagr"])}
+            for f in r["funds"]]), hide_index=True)
+    if r["sips"]:
+        st.markdown("#### My SIPs")
+        st.dataframe(pd.DataFrame([{
+            "Fund": s["fund"], "Monthly amount": s["amount"], "Day": s["day"], "Start": s["start"],
+            "End": s["end"] or "-", "Status": "Active" if s["active"] else "Ended", "Invested": _num(s["invested"], 0),
+            "Value": _num(s["value"], 0), "Recommendation": s["rec"]} for s in r["sips"]]), hide_index=True)
+    if r["assets"]:
+        st.markdown("#### Gold, FDs & other")
+        st.dataframe(pd.DataFrame([{
+            "Type": a["kind"], "Name": a["name"], "Currency": a["currency"], "Invested": _num(a["invested"], 0),
+            "Value": _num(a["value"], 0), "Value basis": a["basis"], "P&L": _num(a["pnl"], 0)}
+            for a in r["assets"]]), hide_index=True)
 
 
 def _stocks_tab():
@@ -168,7 +204,7 @@ def _stocks_tab():
     if lots:
         st.dataframe(pd.DataFrame(lots).drop(columns=["notes"]), hide_index=True)
         _delete_ui("stock_lots", lots, lambda r: f"#{r['id']} {r['symbol']} {r['qty']} @ {r['price']} on {r['buy_date']}", "lot")
-        st.caption("Current value, P&L, XIRR and recommendations per stock are on the **Overview** tab.")
+        st.caption("Current value, P&L, XIRR, weight and recommendation per stock are on the **Overview** tab.")
 
 
 def _funds_tab():
@@ -298,10 +334,7 @@ def _assets_tab():
                 k = st.selectbox("Update current value of", list(opts))
                 nv = st.number_input("New value", min_value=0.0, step=1000.0)
                 if st.form_submit_button("Update value") and nv > 0:
-                    a = opts[k]
-                    storage.delete_row("assets", a["id"])
-                    storage.add_row("assets", {**{c: a[c] for c in storage.TABLES["assets"]},
-                                               "current_value": nv, "updated": date.today().isoformat()})
+                    storage.update_row("assets", opts[k]["id"], {"current_value": nv, "updated": date.today().isoformat()})
                     st.rerun()
     st.caption("Private investments and gold values are your own estimates; update them periodically. "
                "FD values are estimated with quarterly compounding unless you enter a value.")
@@ -342,23 +375,15 @@ def _settings_tab(cfg):
 
 
 def _backup_tab():
-    st.markdown("Your data lives only in `data/stock_research.db` on this computer. Download a backup now and then.")
-    blob = json.dumps({t: storage.list_rows(t) for t in storage.TABLES}, indent=1, default=str)
-    st.download_button("Download backup (JSON)", blob, file_name=f"portfolio_backup_{date.today()}.json", mime="application/json")
+    st.markdown("Your data lives only in `data/stock_research.db` on this computer. Download a backup now and then "
+                "(holdings, SIPs, other assets, watchlist and settings).")
+    st.download_button("Download backup (JSON)", backup.export_all(), file_name=f"portfolio_backup_{date.today()}.json",
+                       mime="application/json")
     up = st.file_uploader("Restore from backup (adds rows; does not delete existing ones)", type="json")
     if up is not None and st.button("Restore"):
         try:
-            payload = json.load(up)
-            idmap = {}
-            for f in payload.get("funds", []):
-                idmap[f["id"]] = storage.add_row("funds", f)
-            for t in ("stock_lots", "assets"):
-                for row in payload.get(t, []):
-                    storage.add_row(t, row)
-            for t in ("fund_lots", "sips"):
-                for row in payload.get(t, []):
-                    if row["fund_id"] in idmap:
-                        storage.add_row(t, {**row, "fund_id": idmap[row["fund_id"]]})
-            st.success("Restored.")
-        except Exception as exc:
-            st.error(f"Restore failed ({type(exc).__name__}). Nothing was guaranteed to be imported; check the file.")
+            counts = backup.import_all(json.load(up))
+        except Exception as exc:  # invalid file or a value SQLite cannot store: the transaction is rolled back
+            st.error(f"Nothing was restored: {exc}")
+        else:
+            st.success("Restored: " + ", ".join(f"{v} {k}" for k, v in counts.items()))

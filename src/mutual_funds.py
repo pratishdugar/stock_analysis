@@ -30,7 +30,10 @@ def search_funds(query: str, getter=None) -> DataResult:
         rows = (getter or _get_json)(f"{MFAPI}/search?q={quote_plus(query.strip())}")
     except Exception as exc:
         return DataResult(error=f"Fund search failed ({type(exc).__name__}).")
-    out = [{"code": str(r["schemeCode"]), "name": r["schemeName"]} for r in rows if "schemeCode" in r]
+    if not isinstance(rows, list):
+        return DataResult(error="Fund search returned an unexpected response.")
+    out = [{"code": str(r["schemeCode"]), "name": str(r.get("schemeName", r["schemeCode"]))}
+           for r in rows if isinstance(r, dict) and "schemeCode" in r]
     return DataResult(data=out) if out else DataResult(error="No funds matched.")
 
 
@@ -54,7 +57,8 @@ def fetch_nav(code: str, source: str, getter=None, ticker_factory=None) -> DataR
             if ticker_factory is None:
                 import yfinance as yf
                 ticker_factory = yf.Ticker
-            df = ticker_factory(code).history(period="max", auto_adjust=True)
+            # Unadjusted prices: units bought on a date must use that day's actual NAV.
+            df = ticker_factory(code).history(period="max", auto_adjust=False)
             nav = df["Close"].dropna() if df is not None and not df.empty else pd.Series(dtype=float)
             if getattr(nav.index, "tz", None) is not None:
                 nav.index = nav.index.tz_localize(None)

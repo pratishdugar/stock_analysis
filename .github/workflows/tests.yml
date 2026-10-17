@@ -13,7 +13,7 @@ jobs:
       - run: pip install -r requirements.txt
       - name: Syntax / import check
         run: |
-          python -m compileall -q app.py config.py src
+          python -m compileall -q app.py config.py ui_portfolio.py src
           python -c "import streamlit, pandas, numpy, plotly, yfinance, feedparser, google.genai, dotenv"
       - name: Unit and integration tests (no secrets, no live APIs)
         run: pytest -q
@@ -25,3 +25,37 @@ jobs:
             sleep 1
           done
           cat streamlit.log; exit 1
+
+  windows:
+    # Exercises the real setup.ps1 / run.ps1 under Windows PowerShell 5.1 (what the README tells users to run).
+    runs-on: windows-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: setup.ps1 (first run)
+        run: .\setup.ps1; if ($LASTEXITCODE -ne 0) { exit 1 }
+      - name: setup.ps1 (re-run must be safe and keep .env)
+        run: |
+          Add-Content .env "# marker"
+          .\setup.ps1; if ($LASTEXITCODE -ne 0) { exit 1 }
+          if (-not (Select-String -Path .env -Pattern "# marker" -Quiet)) { Write-Error ".env was overwritten"; exit 1 }
+      - name: pytest via the project venv
+        run: .\.venv\Scripts\python.exe -m pytest -q; if ($LASTEXITCODE -ne 0) { exit 1 }
+      - name: run.ps1 startup smoke test
+        run: |
+          $p = Start-Process powershell -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File run.ps1 --server.headless true --server.port 8599" -PassThru
+          $ok = $false
+          for ($i = 0; $i -lt 60 -and -not $ok; $i++) {
+            Start-Sleep -Seconds 1
+            try { $ok = (Invoke-WebRequest http://localhost:8599/_stcore/health -UseBasicParsing -TimeoutSec 2).Content -eq "ok" } catch { }
+          }
+          Get-Process python -ErrorAction SilentlyContinue | Stop-Process -Force
+          Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+          if (-not $ok) { Write-Error "Streamlit did not become healthy via run.ps1"; exit 1 }
+          Write-Host "run.ps1 started Streamlit and /_stcore/health returned ok"

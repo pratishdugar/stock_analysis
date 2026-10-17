@@ -5,6 +5,8 @@ They do not consider tax, exit loads, or your personal circumstances; they are p
 """
 from datetime import date
 
+import pandas as pd
+
 from src import finance, mutual_funds
 
 CLASSES = ["Stocks", "Mutual funds", "Gold", "Fixed deposits", "Private / other"]
@@ -22,6 +24,8 @@ def aggregate_lots(lots: list[dict]) -> dict:
     for l in lots:
         p = out.setdefault(l["symbol"], {"symbol": l["symbol"], "qty": 0.0, "invested": 0.0, "currency": l.get("currency"),
                                          "flows": [], "first_date": d(l["buy_date"])})
+        if (l.get("currency") or None) != (p["currency"] or None):
+            p["currency"] = "MIXED"  # lots bought in different currencies cannot be summed
         p["qty"] += l["qty"]
         p["invested"] += l["qty"] * l["price"]
         p["flows"].append((d(l["buy_date"]), -l["qty"] * l["price"]))
@@ -31,25 +35,45 @@ def aggregate_lots(lots: list[dict]) -> dict:
     return out
 
 
+def horizon_cagr(series, years, start=None):
+    """(CAGR, years actually covered) over the last `years` of a dated price series, by calendar date
+    (not row count, which drifts with holidays). Needs at least 1 year of data."""
+    if series is None or len(series) < 2 or not years or years <= 0:
+        return None, None
+    s = series.dropna()
+    if start is None:
+        start = s.index[-1] - pd.Timedelta(days=round(years * 365.25))
+    sub = s[s.index >= start]
+    covered = (sub.index[-1] - sub.index[0]).days / 365.25 if len(sub) > 1 else 0
+    if covered < 1:
+        return None, None
+    return finance.cagr(float(sub.iloc[0]), float(sub.iloc[-1]), covered), covered
+
+
 def stock_recommendation(summary: dict, weight_pct, first_date, cfg: dict, today: date) -> dict:
     """Action from quality score + risk flags + concentration. Never from purchase price or short-term moves."""
     score, risks, reasons = summary["quant_score"], list(summary["risks"]), []
     h = cfg["horizon_years"]
     close, bench = summary.get("close"), summary.get("bench")
-    if close is not None and len(close) > 252:
-        n = round(min(h, (close.index[-1] - close.index[0]).days / 365.25) * 252)
-        c = finance.cagr(float(close.iloc[-n - 1]), float(close.iloc[-1]), n / 252) if 0 < n < len(close) else None
-        if c is not None:
-            reasons.append(f"{n / 252:.1f}y price CAGR {c:.1%} (your horizon: {h}y)")
+    c, yrs = horizon_cagr(close, h)
+    if c is not None:
+        text = f"{yrs:.1f}y price CAGR {c:.1%} (your horizon: {h}y)"
+        bc, _ = horizon_cagr(bench, yrs, start=close.index[-1] - pd.Timedelta(days=round(yrs * 365.25)))
+        if bc is not None:
+            text += f" vs benchmark {bc:.1%}"
+            if c < bc - 0.03:
+                text += " - lagging the market by more than 3%/yr"
+        reasons.append(text)
     if score is None:
         return {"action": "Hold - cannot assess (insufficient data)", "reasons": reasons + risks, "score": None}
     reasons.insert(0, f"Quant score {score}/100 (hold >= {cfg['hold_min']}, buy >= {cfg['buy_min']})")
     over = weight_pct is not None and weight_pct > cfg["max_position_pct"]
     if over:
         reasons.append(f"Position is {weight_pct:.1f}% of portfolio, above your {cfg['max_position_pct']:.0f}% limit")
-        action = "Trim (concentration)"
-    elif score < cfg["hold_min"]:
+    if score < cfg["hold_min"]:  # a weak business outranks concentration: review the whole position
         action = "Review - consider selling" if risks or score < cfg["hold_min"] - 10 else "Review"
+    elif over:
+        action = "Trim (concentration)"
     elif score >= cfg["buy_min"] and not risks and (weight_pct is None or weight_pct < cfg["max_position_pct"] * 0.8):
         action = "Buy more"
     else:
@@ -90,6 +114,10 @@ def asset_recommendation(a: dict, cfg: dict, today: date) -> dict:
                 action = "Hold (safety only) - negative real return"
     elif a["kind"] == "Gold":
         reasons.append("Judge by allocation drift vs your target, not by price moves")
+    elif a["kind"] == "Cash / savings":
+        reasons.append("Keep an emergency fund (e.g. 6 months of expenses); cash beyond that loses to inflation")
+    elif a["kind"] == "PPF / EPF / NPS":
+        reasons.append("Long lock-in retirement product: judge by allocation; update the balance yearly")
     else:
         reasons.append("Illiquid / self-valued: review at least annually; value is your own estimate")
     upd = d(a.get("updated"))
@@ -137,7 +165,9 @@ def analyze_portfolio(cfg: dict, data: dict, fx: dict, today: date | None = None
         ccy = sm["currency"] or pos["currency"] or "?"
         value = pos["qty"] * sm["last_price"]
         same = (pos["currency"] in (None, "", ccy))
-        if not same:
+        if pos["currency"] == "MIXED":
+            warnings.append(f"{sym}: lots were entered in mixed currencies; P&L not computed. Fix the lots on the Stocks tab.")
+        elif not same:
             warnings.append(f"{sym}: purchase currency {pos['currency']} differs from market currency {ccy}; P&L not computed.")
         inv = pos["invested"]
         row = {"symbol": sym, "name": sm["name"], "qty": pos["qty"], "avg_cost": pos["avg_cost"], "price": sm["last_price"],
@@ -156,7 +186,11 @@ def analyze_portfolio(cfg: dict, data: dict, fx: dict, today: date | None = None
         except Exception as exc:
             errors[f["name"] or f["code"]] = str(exc) or type(exc).__name__
             continue
-        bench = fx["bench"](f["benchmark"]) if f.get("benchmark") else None
+        try:
+            bench = fx["bench"](f["benchmark"]) if f.get("benchmark") else None
+        except Exception:
+            bench = None
+            warnings.append(f"{f['name']}: benchmark {f['benchmark']} unavailable; fund judged against the hurdle rate.")
         an = mutual_funds.analyse_fund(nav, bench, f.get("category") or "Equity", cfg, f.get("expense_ratio"))
         units, invested, flows = 0.0, 0.0, []
         for l in (x for x in data.get("fund_lots", []) if x["fund_id"] == f["id"]):

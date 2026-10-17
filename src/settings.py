@@ -41,7 +41,7 @@ def load(path=None) -> dict:
     unreadable or invalid (e.g. hand-edited), fall back to defaults."""
     defaults = copy.deepcopy(config.PORTFOLIO_DEFAULTS)
     try:
-        with storage._connect(path) as con:
+        with storage._db(path) as con:
             rows = con.execute("SELECT key, value FROM settings").fetchall()
         merged = {**defaults, **{k: json.loads(v) for k, v in rows if k in defaults}}
         return merged if not validate(merged) else defaults
@@ -53,7 +53,7 @@ def save(s: dict, path=None) -> list[str]:
     errs = validate(s)
     if errs:
         return errs
-    with storage._connect(path) as con:
+    with storage._db(path) as con:
         for k in config.PORTFOLIO_DEFAULTS:
             con.execute("INSERT OR REPLACE INTO settings VALUES (?, ?)", (k, json.dumps(s[k])))
     return []

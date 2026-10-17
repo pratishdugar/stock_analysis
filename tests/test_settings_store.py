@@ -26,7 +26,7 @@ def test_save_load_roundtrip(tmp_path):
 
 def test_load_falls_back_when_stored_invalid(tmp_path):
     p = tmp_path / "s.db"
-    with storage._connect(p) as con:
+    with storage._db(p) as con:
         con.execute("INSERT INTO settings VALUES ('buy_min', '\"junk\"')")
     assert settings.load(p) == config.PORTFOLIO_DEFAULTS
 

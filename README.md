@@ -1,6 +1,6 @@
 # Stock Research App
 
-Personal, free-data-source stock research tool (US + NSE/BSE) for 1-5 year investing. Streamlit UI, explainable scoring, optional Gemini news analysis. **Research aid only - not financial advice.**
+Personal, free-data-source stock research tool (US + NSE/BSE) for long-term (5+ year, configurable) investing and personal portfolio tracking. Streamlit UI, explainable scoring, optional Gemini news analysis. **Research aid only - not financial advice.**
 
 > Status: see [PROJECT_STATUS.md](PROJECT_STATUS.md). Windows scripts have **not yet been tested on Windows**.
 

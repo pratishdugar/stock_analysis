@@ -4,10 +4,12 @@ A corrupted database file is moved aside (.corrupt) and recreated; storage error
 """
 import json
 import sqlite3
+from contextlib import closing, contextmanager
 from datetime import date
 from pathlib import Path
 
-DEFAULT_PATH = Path("data") / "stock_research.db"
+# Absolute, so the app finds the same database whatever directory it is started from.
+DEFAULT_PATH = Path(__file__).resolve().parent.parent / "data" / "stock_research.db"
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS watchlist (symbol TEXT PRIMARY KEY, added TEXT NOT NULL);
@@ -49,32 +51,47 @@ def _connect(path) -> sqlite3.Connection:
         return con
 
 
+@contextmanager
+def _db(path=None):
+    """Connection that commits on success, rolls back on error, and is always closed
+    (an open handle keeps the file locked on Windows)."""
+    with closing(_connect(path)) as con:
+        with con:
+            yield con
+
+
 def add_watchlist(symbol: str, path=None) -> None:
-    with _connect(path) as con:
+    with _db(path) as con:
         con.execute("INSERT OR IGNORE INTO watchlist VALUES (?, ?)", (symbol, date.today().isoformat()))
 
 
 def remove_watchlist(symbol: str, path=None) -> None:
-    with _connect(path) as con:
+    with _db(path) as con:
         con.execute("DELETE FROM watchlist WHERE symbol = ?", (symbol,))
 
 
 def list_watchlist(path=None) -> list[str]:
-    with _connect(path) as con:
+    with _db(path) as con:
         return [r[0] for r in con.execute("SELECT symbol FROM watchlist ORDER BY symbol")]
 
 
 def save_research(symbol, quant_score, coverage, label, news_score=None, combined_score=None,
                   currency=None, details=None, path=None, day=None) -> None:
-    """Upsert today's snapshot. A later news score for the same day updates the row."""
-    with _connect(path) as con:
-        con.execute("INSERT OR REPLACE INTO research VALUES (?,?,?,?,?,?,?,?,?)",
-                    (symbol, day or date.today().isoformat(), quant_score, coverage, label, news_score,
-                     combined_score, currency, json.dumps(details or {})))
+    """Upsert one snapshot per symbol per day. A save without a news score keeps the news/combined
+    score already stored for that day (the page is re-rendered many times per session)."""
+    with _db(path) as con:
+        con.execute(
+            "INSERT INTO research VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(symbol, day) DO UPDATE SET "
+            "quant_score=excluded.quant_score, coverage=excluded.coverage, label=excluded.label, "
+            "news_score=COALESCE(excluded.news_score, research.news_score), "
+            "combined_score=COALESCE(excluded.combined_score, research.combined_score), "
+            "currency=excluded.currency, details=excluded.details",
+            (symbol, day or date.today().isoformat(), quant_score, coverage, label, news_score,
+             combined_score, currency, json.dumps(details or {})))
 
 
 def research_history(symbol, limit=30, path=None) -> list[dict]:
-    with _connect(path) as con:
+    with _db(path) as con:
         con.row_factory = sqlite3.Row
         rows = con.execute("SELECT * FROM research WHERE symbol = ? ORDER BY day DESC LIMIT ?",
                            (symbol, limit)).fetchall()
@@ -94,20 +111,28 @@ TABLES = {
 
 def add_row(table, values: dict, path=None) -> int:
     cols = [c for c in TABLES[table] if c in values]
-    with _connect(path) as con:
+    with _db(path) as con:
         cur = con.execute(f"INSERT INTO {table} ({','.join(cols)}) VALUES ({','.join('?' * len(cols))})",
                           [values[c] for c in cols])
         return cur.lastrowid
 
 
+def update_row(table, row_id, values: dict, path=None) -> None:
+    cols = [c for c in TABLES[table] if c in values]
+    if cols:
+        with _db(path) as con:
+            con.execute(f"UPDATE {table} SET {', '.join(c + ' = ?' for c in cols)} WHERE id = ?",
+                        [values[c] for c in cols] + [row_id])
+
+
 def list_rows(table, path=None) -> list[dict]:
-    with _connect(path) as con:
+    with _db(path) as con:
         con.row_factory = sqlite3.Row
         return [dict(r) for r in con.execute(f"SELECT * FROM {table} ORDER BY id")]
 
 
 def delete_row(table, row_id, path=None) -> None:
-    with _connect(path) as con:
+    with _db(path) as con:
         con.execute(f"DELETE FROM {table} WHERE id = ?", (row_id,))
         if table == "funds":  # keep children consistent
             con.execute("DELETE FROM fund_lots WHERE fund_id = ?", (row_id,))

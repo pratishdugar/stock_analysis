@@ -8,9 +8,14 @@ TIMEOUT = 10
 _STOP = {"inc", "corp", "corporation", "ltd", "limited", "co", "company", "plc", "the", "holdings", "group"}
 
 
+def _name_words(name: str | None) -> list[str]:
+    return [w for w in re.findall(r"[a-z0-9]+", (name or "").lower()) if w not in _STOP]
+
+
 def feed_urls(symbol: str, name: str | None) -> list[str]:
     base = symbol.split(".")[0]
-    q = quote_plus(f'"{name}" stock' if name else f"{base} stock")
+    words = _name_words(name)
+    q = quote_plus(f'"{" ".join(words[:3])}" stock' if words else f"{base} stock")
     urls = [f"https://news.google.com/rss/search?q={q}&hl=en&ceid=US:en"]
     if "." not in symbol:  # Yahoo's headline feed is only reliable for US tickers
         urls.append(f"https://feeds.finance.yahoo.com/rss/2.0/headline?s={symbol}&region=US&lang=en-US")
@@ -56,11 +61,12 @@ def dedupe(articles: list[dict]) -> list[dict]:
 def is_relevant(article: dict, symbol: str, name: str | None) -> bool:
     text = f"{article['title']} {article['summary']}".lower()
     terms = {symbol.split(".")[0].lower()} if len(symbol.split(".")[0]) >= 3 else set()
-    if name:
-        words = [w for w in re.findall(r"[a-z0-9]+", name.lower()) if w not in _STOP]
-        if words:
-            terms.add(" ".join(words[:2]))
-            terms.add(words[0]) if len(words[0]) >= 4 else None
+    words = _name_words(name)
+    if words:
+        terms.add(" ".join(words[:2]))
+        # A lone first word ("Tata", "Reliance") is only safe when it IS the whole name ("Apple Inc.").
+        if len(words) == 1 and len(words[0]) >= 4:
+            terms.add(words[0])
     return any(re.search(rf"\b{re.escape(t)}\b", text) for t in terms)
 
 

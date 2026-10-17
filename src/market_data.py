@@ -6,7 +6,6 @@ as DataResult(error=...) instead of raising, so the UI never crashes.
 import re
 from dataclasses import dataclass
 
-import pandas as pd
 
 SYMBOL_RE = re.compile(r"^[A-Z0-9^][A-Z0-9.\-&]{0,19}$")
 

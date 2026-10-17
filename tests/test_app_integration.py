@@ -147,3 +147,19 @@ def test_add_stock_lot_and_save_settings_via_forms(monkeypatch):
     f("Investment horizon (years)", "number_input").set_value(10)
     next(b for b in at.button if b.label == "Save settings").click().run(timeout=30)
     assert settings.load()["horizon_years"] == 10
+
+
+def test_overview_shows_holdings_xirr_and_sips(monkeypatch):
+    from src import mutual_funds as mfm
+    st.cache_data.clear()
+    _seed_portfolio()
+    nav = pd.Series(100 * np.exp(np.cumsum(np.full(1600, 0.0004))), index=pd.bdate_range(end="2025-06-30", periods=1600))
+    monkeypatch.setattr(md, "fetch_history", lambda s, *a, **k: md.DataResult(data=fake_hist()))
+    monkeypatch.setattr(md, "fetch_info", lambda s, *a, **k: md.DataResult(error="none"))
+    monkeypatch.setattr(mfm, "fetch_nav", lambda c, s, **k: md.DataResult(data=nav))
+    at = AppTest.from_file(APP).run(timeout=30)
+    at.sidebar.radio[0].set_value("Portfolio").run(timeout=60)
+    assert not at.exception
+    cols = {c for df in at.dataframe for c in df.value.columns}
+    assert {"XIRR", "Monthly amount"} <= cols
+    assert any("Test Fund" in df.value.to_csv() and "Monthly amount" in df.value.columns for df in at.dataframe)

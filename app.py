@@ -5,11 +5,14 @@ import streamlit as st
 from plotly.subplots import make_subplots
 
 import config
-from src import fundamentals, gemini_analysis, market_data as md, news as news_mod, report, scoring, screener, storage, universe, technicals as ta
+from src import (fundamentals, gemini_analysis, market_data as md, news as news_mod, report, scoring, screener,
+                 settings as settings_mod, storage, technicals as ta, universe)
 
 st.set_page_config(page_title="Stock Research", page_icon="📈", layout="wide")
 st.title("📈 Stock Research")
-st.caption("Personal long-term (1-5 year) research tool. Not financial advice. "
+HORIZON = settings_mod.load()["horizon_years"]
+st.caption(f"Personal long-term research tool (horizon: {HORIZON}+ years, change in Portfolio > Settings). "
+           "Not financial advice. "
            "Data from Yahoo Finance (unofficial; may be delayed or incomplete).")
 
 
@@ -37,6 +40,16 @@ def safe_storage(fn, *a, default=None, **k):
         return default
 
 
+def summarize_symbol(sym):
+    h, herr = load_history(sym)
+    if herr:
+        raise RuntimeError(herr)
+    i, ierr = load_info(sym)
+    b, _ = load_history(md.benchmark_for(sym)[0])
+    return report.build_summary(sym, h, md.DataResult(data=i, error=ierr),
+                                b["Close"] if b is not None else None)
+
+
 def watchlist_page():
     st.subheader("Watchlist & comparison")
     wl = safe_storage(storage.list_watchlist, default=[])
@@ -50,19 +63,16 @@ def watchlist_page():
         st.rerun()
     rows, fig = [], go.Figure()
     for sym in picked:
-        h, herr = load_history(sym)
-        if herr:
-            rows.append({"Symbol": sym, "Label": f"Data error: {herr}"})
+        try:
+            sm = summarize_symbol(sym)
+        except Exception as exc:
+            rows.append({"Symbol": sym, "Label (quant only)": f"Data error: {exc}"})
             continue
-        i, ierr = load_info(sym)
-        b, _ = load_history(md.benchmark_for(sym)[0])
-        sm = report.build_summary(sym, h, md.DataResult(data=i, error=ierr) if not ierr else md.DataResult(error=ierr),
-                                  b["Close"] if b is not None else None)
         rows.append({"Symbol": sym, "Market": sm["market"], "Currency": sm["currency"] or "?",
                      "Quant score": "Incomplete" if sm["quant_score"] is None else sm["quant_score"],
                      "Coverage": f"{sm['coverage']:.0%}", "1y return": fmt_pct(sm["ret_1y"]),
                      "Max drawdown (3y)": fmt_pct(sm["max_drawdown"]), "Label (quant only)": sm["label"]})
-        c = h["Close"].tail(504)
+        c = sm["close"].tail(504)
         fig.add_trace(go.Scatter(x=c.index, y=c / c.iloc[0] * 100, name=sym))
     if rows:
         st.dataframe(pd.DataFrame(rows), hide_index=True)
@@ -71,16 +81,6 @@ def watchlist_page():
     if fig.data:
         fig.update_layout(height=400, yaxis_title="Rebased price (start = 100, ~2y)")
         st.plotly_chart(fig, width="stretch")
-
-
-def summarize_symbol(sym):
-    h, herr = load_history(sym)
-    if herr:
-        raise RuntimeError(herr)
-    i, ierr = load_info(sym)
-    b, _ = load_history(md.benchmark_for(sym)[0])
-    return report.build_summary(sym, h, md.DataResult(data=i, error=ierr) if not ierr else md.DataResult(error=ierr),
-                                b["Close"] if b is not None else None)
 
 
 def screener_page():
@@ -112,7 +112,7 @@ def screener_page():
         if config.gemini_configured() and st.button(f"Run news analysis on top {len(screener.news_shortlist(cands))}"):
             for s in screener.news_shortlist(cands):
                 arts, _ = news_mod.collect_news(s["symbol"], s["name"])
-                na = gemini_analysis.analyze_news(s["symbol"], arts)
+                na = gemini_analysis.analyze_news(s["symbol"], arts, horizon_years=HORIZON)
                 st.write(f"**{s['symbol']}**: " + (f"news score {na.result['news_score']:.0f}, "
                          f"combined {scoring.combine(s['quant_score'], na.result['news_score'])}" if na.ok else na.error))
 
@@ -134,8 +134,14 @@ if view == "Screener":
     screener_page()
     st.stop()
 if view == "Portfolio":
+    import sqlite3
+
     import ui_portfolio
-    ui_portfolio.portfolio_page(load_history, summarize_symbol)
+    try:
+        ui_portfolio.portfolio_page(load_history, summarize_symbol)
+    except sqlite3.Error as exc:
+        st.error(f"Local database problem ({exc}). Your data file is data/stock_research.db; "
+                 "restore it from a backup (Portfolio > Backup) if it is damaged.")
     st.stop()
 
 if go_btn:
@@ -246,7 +252,7 @@ with tab4:
         st.session_state[f"arts_{symbol}"] = arts
         if arts:
             with st.spinner("Asking Gemini..."):
-                st.session_state[f"news_{symbol}"] = gemini_analysis.analyze_news(symbol, arts)
+                st.session_state[f"news_{symbol}"] = gemini_analysis.analyze_news(symbol, arts, horizon_years=HORIZON)
         st.rerun()
     arts = st.session_state.get(f"arts_{symbol}", [])
     na = st.session_state.get(f"news_{symbol}")

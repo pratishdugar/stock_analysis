@@ -1,6 +1,6 @@
 """Pure financial helpers: XIRR, CAGR, FD accrual, SIP schedules, currency conversion."""
 import calendar
-from datetime import date, timedelta
+from datetime import date
 
 import pandas as pd
 
