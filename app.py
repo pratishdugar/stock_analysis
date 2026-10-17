@@ -5,7 +5,7 @@ import streamlit as st
 from plotly.subplots import make_subplots
 
 import config
-from src import fundamentals, gemini_analysis, market_data as md, news as news_mod, report, scoring, storage, technicals as ta
+from src import fundamentals, gemini_analysis, market_data as md, news as news_mod, report, scoring, screener, storage, universe, technicals as ta
 
 st.set_page_config(page_title="Stock Research", page_icon="📈", layout="wide")
 st.title("📈 Stock Research")
@@ -73,8 +73,52 @@ def watchlist_page():
         st.plotly_chart(fig, width="stretch")
 
 
+def summarize_symbol(sym):
+    h, herr = load_history(sym)
+    if herr:
+        raise RuntimeError(herr)
+    i, ierr = load_info(sym)
+    b, _ = load_history(md.benchmark_for(sym)[0])
+    return report.build_summary(sym, h, md.DataResult(data=i, error=ierr) if not ierr else md.DataResult(error=ierr),
+                                b["Close"] if b is not None else None)
+
+
+def screener_page():
+    st.subheader("Curated screener")
+    st.caption("Quantitative pre-filter over a small hand-picked list (src/universe.py). Not a recommendation list. "
+               "Generic thresholds, unofficial data; news analysis runs only on the top 3 shortlisted names, on demand.")
+    uni = st.selectbox("Universe", list(universe.UNIVERSES))
+    c1, c2, c3 = st.columns(3)
+    min_score = c1.slider("Min quant score", 0, 100, 55)
+    min_cov = c2.slider("Min data coverage", 0.3, 1.0, 0.6)
+    excl = c3.checkbox("Exclude names with risk flags", value=True)
+    if st.button("Run screen"):
+        bar = st.progress(0.0, text="Fetching data (cached for 1h)...")
+        summaries, errors = screener.run_screen(universe.UNIVERSES[uni], summarize_symbol, bar.progress)
+        bar.empty()
+        st.session_state["screen"] = (summaries, errors)
+    if "screen" not in st.session_state:
+        return
+    summaries, errors = st.session_state["screen"]
+    cands = screener.filter_candidates(summaries, min_score, min_cov, exclude_risks=excl)
+    st.write(f"{len(cands)} of {len(summaries)} stocks passed" + (f"; {len(errors)} failed to load." if errors else "."))
+    if errors:
+        st.warning("; ".join(f"{k}: {v}" for k, v in errors.items()))
+    if cands:
+        st.dataframe(pd.DataFrame([{"Symbol": s["symbol"], "Name": s["name"], "Currency": s["currency"] or "?",
+                                    "Quant score": s["quant_score"], "Coverage": f"{s['coverage']:.0%}",
+                                    "1y return": fmt_pct(s["ret_1y"]), "Max drawdown (3y)": fmt_pct(s["max_drawdown"]),
+                                    "Label (quant only)": s["label"]} for s in cands]), hide_index=True)
+        if config.gemini_configured() and st.button(f"Run news analysis on top {len(screener.news_shortlist(cands))}"):
+            for s in screener.news_shortlist(cands):
+                arts, _ = news_mod.collect_news(s["symbol"], s["name"])
+                na = gemini_analysis.analyze_news(s["symbol"], arts)
+                st.write(f"**{s['symbol']}**: " + (f"news score {na.result['news_score']:.0f}, "
+                         f"combined {scoring.combine(s['quant_score'], na.result['news_score'])}" if na.ok else na.error))
+
+
 with st.sidebar:
-    view = st.radio("View", ["Analyse", "Watchlist"], horizontal=True)
+    view = st.radio("View", ["Analyse", "Watchlist", "Screener"], horizontal=True)
     raw = st.text_input("Ticker", value="AAPL", help="US: AAPL | NSE: RELIANCE.NS | BSE: RELIANCE.BO")
     go_btn = st.button("Analyse", type="primary")
     st.markdown("**Examples:** `AAPL`, `MSFT`, `TCS.NS`, `RELIANCE.BO`")
@@ -85,6 +129,9 @@ with st.sidebar:
 
 if view == "Watchlist":
     watchlist_page()
+    st.stop()
+if view == "Screener":
+    screener_page()
     st.stop()
 
 if go_btn:

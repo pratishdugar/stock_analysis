@@ -82,3 +82,14 @@ def test_snapshot_saved_and_watchlist_page(monkeypatch):
     assert storage.list_watchlist() == ["AAPL"]
     at.sidebar.radio[0].set_value("Watchlist").run(timeout=30)
     assert not at.exception and at.dataframe
+
+
+def test_screener_page_runs_with_mock_data(monkeypatch):
+    st.cache_data.clear()
+    monkeypatch.setattr(md, "fetch_history", lambda s, *a, **k: md.DataResult(data=fake_hist()))
+    monkeypatch.setattr(md, "fetch_info", lambda s, *a, **k: md.DataResult(error="none"))
+    at = AppTest.from_file(APP).run(timeout=30)
+    at.sidebar.radio[0].set_value("Screener").run(timeout=30)
+    next(b for b in at.button if b.label == "Run screen").click().run(timeout=60)
+    assert not at.exception
+    assert any("passed" in m.value for m in at.markdown)

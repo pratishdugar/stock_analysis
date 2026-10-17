@@ -1,5 +1,5 @@
 # Project status
-**Latest stable phase:** phase-3-watchlist (branch `ccr-01f79ea2-5hbe2r`; commit hash in git log)
+**Latest stable phase:** phase-4-screener (branch `ccr-01f79ea2-5hbe2r`; commit hash in git log)
 
 ## Done
 - Phase 0: skeleton, config, GitHub Actions (run on 180aad5: **success**), PowerShell scripts.
@@ -16,8 +16,11 @@
 - Phase 3: SQLite (`data/stock_research.db`, git-ignored) watchlist, daily research snapshots, history expander,
   Watchlist view with multi-stock comparison table + rebased price chart; corrupted DB is moved aside and recreated.
 
+- Phase 4: curated 30-stock universe (`src/universe.py`), quant-first screener with filters (score, coverage, risk
+  flags, drawdown), cached data, Gemini news only on demand for top 3 (hard cap).
+
 ## Tests actually run (Linux sandbox, Python 3.13)
-- `pytest -q`: 60 passed (unit, mocked integration, Streamlit AppTest). Headless Streamlit start: health `ok`, root HTTP 200.
+- `pytest -q`: 65 passed (unit, mocked integration, Streamlit AppTest). Headless Streamlit start: health `ok`, root HTTP 200.
 - GitHub Actions for Phase 1: see Actions tab (not yet checked when this file was written).
 
 ## Known limitations
@@ -32,4 +35,5 @@
 - Windows verification of `setup.ps1`, `run.ps1`, app with live data (try AAPL, TCS.NS, RELIANCE.BO).
 
 ## Next task
-Phase 4: curated US+India screener (`src/screener.py`, `data/universe` as a Python list), quant-first, bounded news.
+All planned phases are implemented. Next: user verifies on Windows with live data, reports bugs; then consider
+sector-calibrated thresholds, FX-aware comparison, and merging this branch to `main` (open a PR).

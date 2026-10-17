@@ -10,3 +10,6 @@
 
 ## Phase 3 - watchlist
 - SQLite watchlist/history, compare view; 60 tests.
+
+## Phase 4 - screener
+- Curated universe + quant screener, capped news step; 65 tests.

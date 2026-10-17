@@ -4,6 +4,12 @@ Personal, free-data-source stock research tool (US + NSE/BSE) for 1-5 year inves
 
 > Status: see [PROJECT_STATUS.md](PROJECT_STATUS.md). Windows scripts have **not yet been tested on Windows**.
 
+## Features
+- **Analyse**: price/volume chart, SMA, RSI, returns, drawdown, volatility, benchmark-relative return, explainable 0-100 quant score.
+- **News (Gemini, optional)**: up to 8 articles in one request; combined score = 0.7 quant + 0.3 news, shown only when both exist.
+- **Watchlist**: local SQLite (`data/`, git-ignored), research snapshots, side-by-side compare.
+- **Screener**: curated US + NSE list in `src/universe.py`; news analysis only for the top 3.
+
 ## Run on Windows (PowerShell)
 1. Install [Git](https://git-scm.com/download/win) and [Python 3.12](https://www.python.org/downloads/) (tick "Add python.exe to PATH").
 2. `git clone https://github.com/pratishdugar/stock_analysis.git` then `cd stock_analysis`
